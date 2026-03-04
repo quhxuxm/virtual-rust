@@ -28,3 +28,4 @@ target
 # Virtual Rust shadow projects
 .virtual-rust/
 Cargo.lock
+.idea
