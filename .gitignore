@@ -24,3 +24,6 @@ target
 # Added by cargo
 
 /target
+
+# Virtual Rust shadow projects
+.virtual-rust/
