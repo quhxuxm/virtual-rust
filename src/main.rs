@@ -17,8 +17,8 @@ struct Cli {
     #[arg(value_name = "FILE|DIR")]
     input: Option<String>,
 
-    /// Arguments passed through to the compiled program
-    #[arg(last = true, value_name = "ARGS")]
+    /// Extra arguments passed through to cargo (e.g. --bin <name>, --release)
+    #[arg(last = true, value_name = "CARGO_ARGS")]
     passthrough_args: Vec<String>,
 }
 
@@ -182,7 +182,7 @@ fn run_file(file_path: &str, passthrough_args: &[String]) {
         Ok(source) => {
             if virtual_rust::cargo_runner::has_dependencies(&source) {
                 // Dependencies detected — compile & run with cargo
-                if let Err(e) = virtual_rust::cargo_runner::run_with_cargo(&source, Some(path)) {
+                if let Err(e) = virtual_rust::cargo_runner::run_with_cargo(&source, Some(path), passthrough_args) {
                     eprintln!("\x1b[31merror\x1b[0m: {e}");
                     std::process::exit(1);
                 }

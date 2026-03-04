@@ -170,7 +170,7 @@ fn generate_cargo_toml(manifest: &EmbeddedManifest, source_path: Option<&Path>) 
 ///
 /// Stdin/stdout/stderr are inherited, so the program interacts with the
 /// terminal normally.
-pub fn run_with_cargo(source: &str, source_path: Option<&Path>) -> Result<(), String> {
+pub fn run_with_cargo(source: &str, source_path: Option<&Path>, extra_args: &[String]) -> Result<(), String> {
     let manifest =
         parse_embedded_manifest(source).ok_or("No embedded dependency manifest found")?;
 
@@ -199,9 +199,15 @@ pub fn run_with_cargo(source: &str, source_path: Option<&Path>) -> Result<(), St
     );
 
     // Run cargo build first for clearer error separation
-    let status = Command::new("cargo")
-        .args(["run", "--quiet"])
-        .current_dir(&project_dir)
+    let mut cmd = Command::new("cargo");
+    cmd.args(["run", "--quiet"]).current_dir(&project_dir);
+
+    // Pass extra arguments directly to cargo (e.g. --release, -- <program args>)
+    if !extra_args.is_empty() {
+        cmd.args(extra_args);
+    }
+
+    let status = cmd
         .status()
         .map_err(|e| format!("Failed to invoke cargo: {e}. Is cargo installed?"))?;
 
@@ -253,9 +259,8 @@ pub fn run_cargo_project(project_dir: &Path, extra_args: &[String]) -> Result<()
     let mut cmd = Command::new("cargo");
     cmd.arg("run").arg("--quiet").current_dir(project_dir);
 
-    // Pass extra arguments after `--`
+    // Pass extra arguments directly to cargo (e.g. --bin <name>, --release, -- <program args>)
     if !extra_args.is_empty() {
-        cmd.arg("--");
         cmd.args(extra_args);
     }
 
