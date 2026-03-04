@@ -1,0 +1,110 @@
+{
+    "name": "virtual-rust",
+    "displayName": "Virtual Rust",
+    "description": "IDE support for Virtual Rust format — run Rust files with inline //! dependency declarations and full rust-analyzer integration",
+    "version": "0.1.0",
+    "publisher": "virtual-rust",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/phodal/virtual-rust"
+    },
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Other"
+    ],
+    "keywords": [
+        "rust",
+        "virtual-rust",
+        "cargo",
+        "dependencies",
+        "script"
+    ],
+    "activationEvents": [
+        "onLanguage:rust"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "virtual-rust.run",
+                "title": "Run File",
+                "category": "Virtual Rust",
+                "icon": "$(play)"
+            },
+            {
+                "command": "virtual-rust.syncProject",
+                "title": "Sync Shadow Project",
+                "category": "Virtual Rust",
+                "icon": "$(sync)"
+            },
+            {
+                "command": "virtual-rust.cleanShadowProjects",
+                "title": "Clean All Shadow Projects",
+                "category": "Virtual Rust",
+                "icon": "$(trash)"
+            }
+        ],
+        "configuration": {
+            "title": "Virtual Rust",
+            "properties": {
+                "virtual-rust.autoSync": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Automatically generate a shadow Cargo project when a virtual-rust file is opened or saved, enabling rust-analyzer support for //! dependencies."
+                },
+                "virtual-rust.binaryPath": {
+                    "type": "string",
+                    "default": "virtual-rust",
+                    "description": "Path to the virtual-rust binary. Used when running files without the shadow project fallback."
+                },
+                "virtual-rust.shadowProjectDir": {
+                    "type": "string",
+                    "default": ".virtual-rust",
+                    "description": "Directory name for shadow Cargo projects (relative to workspace root)."
+                },
+                "virtual-rust.runWithCargo": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Use 'cargo run' in the shadow project instead of the virtual-rust binary. Ensures all dependencies are compiled and available."
+                }
+            }
+        },
+        "menus": {
+            "editor/title/run": [
+                {
+                    "command": "virtual-rust.run",
+                    "when": "resourceLangId == rust",
+                    "group": "navigation@0"
+                }
+            ],
+            "editor/context": [
+                {
+                    "command": "virtual-rust.run",
+                    "when": "resourceLangId == rust",
+                    "group": "virtual-rust@1"
+                },
+                {
+                    "command": "virtual-rust.syncProject",
+                    "when": "resourceLangId == rust",
+                    "group": "virtual-rust@2"
+                }
+            ]
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "package": "npx @vscode/vsce package --no-dependencies",
+        "lint": "eslint src --ext ts"
+    },
+    "devDependencies": {
+        "@types/node": "^20.11.0",
+        "@types/vscode": "^1.85.0",
+        "typescript": "^5.3.0"
+    }
+}

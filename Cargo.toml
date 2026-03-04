@@ -1,0 +1,9 @@
+[package]
+name = "virtual-rust"
+version = "0.1.0"
+edition = "2021"
+description = "A virtual machine that interprets and runs Rust source code directly without compilation"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
