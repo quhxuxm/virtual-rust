@@ -4,6 +4,17 @@ version = "0.1.0"
 edition = "2021"
 description = "A virtual machine that interprets and runs Rust source code directly without compilation"
 license = "MIT"
+repository = "https://github.com/quhxuxm/virtual-rust"
+homepage = "https://github.com/quhxuxm/virtual-rust"
+readme = "README.md"
+keywords = ["interpreter", "rust", "virtual-machine", "scripting", "repl"]
+categories = ["command-line-utilities", "development-tools", "compilers"]
+exclude = [
+    "examples/async_project/target/",
+    "target/",
+    "vscode-virtual-rust/",
+    ".vscode/",
+]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
