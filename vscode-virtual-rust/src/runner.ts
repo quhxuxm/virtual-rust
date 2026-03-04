@@ -1,13 +1,15 @@
 /**
  * Run virtual-rust files via a VSCode terminal.
  *
- * Supports two execution modes:
+ * Supports three execution modes:
  * 1. `cargo run` in the shadow project directory (default, ensures deps compile)
- * 2. `virtual-rust <file>` using the virtual-rust binary
+ * 2. `virtual-rust <dir>` for loose `.rs` source directories
+ * 3. `virtual-rust <file>` using the virtual-rust binary
  */
 
 import * as vscode from 'vscode';
 import { ShadowProjectManager } from './shadow';
+import { detectLooseModules } from './detector';
 
 export class Runner {
     private terminal: vscode.Terminal | undefined;
@@ -31,6 +33,15 @@ export class Runner {
         const binaryPath = config.get<string>('binaryPath', 'virtual-rust');
 
         const terminal = this.getOrCreateTerminal();
+
+        // Check if this file is part of a loose modules directory
+        const looseInfo = detectLooseModules(filePath);
+        if (looseInfo) {
+            // Run the directory with virtual-rust (it will find the entry file)
+            terminal.sendText(`"${binaryPath}" "${looseInfo.dirPath}"`);
+            terminal.show();
+            return;
+        }
 
         if (useCargo) {
             // Prefer running via the shadow project so dependencies compile

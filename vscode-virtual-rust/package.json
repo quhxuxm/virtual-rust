@@ -2,7 +2,7 @@
     "name": "virtual-rust",
     "displayName": "Virtual Rust",
     "description": "IDE support for Virtual Rust format — run Rust files with inline //! dependency declarations and full rust-analyzer integration",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "publisher": "virtual-rust",
     "license": "MIT",
     "repository": {

@@ -18,7 +18,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
-import { parseManifest, generateCargoToml } from './detector';
+import { parseManifest, generateCargoToml, detectLooseModules, LooseModulesInfo } from './detector';
 
 export class ShadowProjectManager {
     private shadowBaseDir: string;
@@ -48,6 +48,14 @@ export class ShadowProjectManager {
      * document does not contain a virtual-rust manifest.
      */
     async syncProject(document: vscode.TextDocument): Promise<string | null> {
+        const filePath = document.uri.fsPath;
+
+        // Check if this file is part of a loose modules directory
+        const looseInfo = detectLooseModules(filePath);
+        if (looseInfo) {
+            return this.syncLooseModules(looseInfo);
+        }
+
         const text = document.getText();
         const manifest = parseManifest(text);
 
@@ -55,7 +63,6 @@ export class ShadowProjectManager {
             return null;
         }
 
-        const filePath = document.uri.fsPath;
         const projectName = this.makeProjectName(filePath);
         const projectDir = path.join(this.shadowBaseDir, projectName);
         const srcDir = path.join(projectDir, 'src');
@@ -87,6 +94,90 @@ export class ShadowProjectManager {
             );
             vscode.window.showErrorMessage(
                 `Virtual Rust: failed to sync shadow project — ${msg}`
+            );
+            return null;
+        }
+    }
+
+    /**
+     * Create or update a shadow Cargo project for a directory of loose `.rs`
+     * files. The entry file becomes `src/main.rs` and all other files are
+     * symlinked as sibling modules.
+     */
+    private syncLooseModules(info: LooseModulesInfo): string | null {
+        const dirName = path.basename(info.dirPath);
+        const projectName = this.makeProjectName(info.dirPath);
+        const projectDir = path.join(this.shadowBaseDir, projectName);
+        const srcDir = path.join(projectDir, 'src');
+
+        try {
+            fs.mkdirSync(srcDir, { recursive: true });
+
+            // Collect embedded manifests from all files
+            let depsContent = '';
+            for (const file of info.allFiles) {
+                try {
+                    const content = fs.readFileSync(file, 'utf-8');
+                    const manifest = parseManifest(content);
+                    if (manifest) {
+                        // Extract dependency lines
+                        const lines = manifest.tomlContent.split('\n');
+                        for (const line of lines) {
+                            const trimmed = line.trim();
+                            if (trimmed && !trimmed.startsWith('[') && !depsContent.includes(trimmed)) {
+                                depsContent += trimmed + '\n';
+                            }
+                        }
+                    }
+                } catch { /* skip */ }
+            }
+
+            // Generate Cargo.toml
+            let cargoToml = [
+                '[package]',
+                `name = "${dirName.replace(/[^a-zA-Z0-9_-]/g, '-')}"`,
+                'version = "0.1.0"',
+                'edition = "2021"',
+                '',
+            ].join('\n');
+
+            if (depsContent) {
+                cargoToml += '\n[dependencies]\n' + depsContent;
+            }
+
+            this.writeIfChanged(path.join(projectDir, 'Cargo.toml'), cargoToml);
+
+            // Symlink entry file as src/main.rs
+            this.ensureSymlink(info.entryFile, path.join(srcDir, 'main.rs'));
+
+            // Symlink all other .rs files into src/
+            for (const file of info.allFiles) {
+                if (file === info.entryFile) {
+                    continue;
+                }
+                const fileName = path.basename(file);
+                this.ensureSymlink(file, path.join(srcDir, fileName));
+            }
+
+            // Track all files in managedProjects so any file triggers the project
+            for (const file of info.allFiles) {
+                this.managedProjects.set(file, projectDir);
+            }
+
+            this.scheduleLinkedProjectsUpdate();
+
+            this.outputChannel.appendLine(
+                `[sync] loose modules: ${dirName}/ (${info.allFiles.length} files) → ${projectDir}`
+            );
+
+            return projectDir;
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.outputChannel.appendLine(
+                `[error] Failed to sync loose modules for ${info.dirPath}: ${msg}`
+            );
+            vscode.window.showErrorMessage(
+                `Virtual Rust: failed to sync loose modules — ${msg}`
             );
             return null;
         }

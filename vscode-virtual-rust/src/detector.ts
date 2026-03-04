@@ -7,7 +7,13 @@
  * //! rand = "0.8"
  * //! serde = { version = "1.0", features = ["derive"] }
  * ```
+ *
+ * Also detects loose `.rs` source directories — folders with multiple `.rs`
+ * files (no `Cargo.toml`) where one file contains `fn main()`.
  */
+
+import * as fs from 'fs';
+import * as path from 'path';
 
 /** Parsed manifest information extracted from `//!` comments. */
 export interface ManifestInfo {
@@ -99,4 +105,78 @@ export function generateCargoToml(manifest: ManifestInfo, name: string): string 
         manifest.tomlContent,
         '',
     ].join('\n');
+}
+
+// ── Loose source directory detection ─────────────────────────────
+
+/** Information about a loose `.rs` source directory. */
+export interface LooseModulesInfo {
+    /** Absolute path to the directory */
+    dirPath: string;
+    /** Absolute path to the entry file (the one with `fn main()`) */
+    entryFile: string;
+    /** Absolute paths to all `.rs` files in the directory */
+    allFiles: string[];
+}
+
+/**
+ * Check whether a `.rs` file lives in a "loose modules" directory — a
+ * directory containing multiple `.rs` files with no `Cargo.toml`, where
+ * exactly one file has `fn main()`.
+ *
+ * Returns `LooseModulesInfo` if the file is part of such a directory,
+ * `null` otherwise.
+ */
+export function detectLooseModules(filePath: string): LooseModulesInfo | null {
+    const dir = path.dirname(filePath);
+
+    // Must not be a Cargo project
+    if (fs.existsSync(path.join(dir, 'Cargo.toml'))) {
+        return null;
+    }
+
+    // Collect all .rs files in the directory
+    let entries: string[];
+    try {
+        entries = fs.readdirSync(dir)
+            .filter(name => name.endsWith('.rs'))
+            .map(name => path.join(dir, name));
+    } catch {
+        return null;
+    }
+
+    // Need at least 2 .rs files for this to be a multi-file project
+    if (entries.length < 2) {
+        return null;
+    }
+
+    // Find the entry file (the one with fn main())
+    const mainFiles: string[] = [];
+    for (const file of entries) {
+        try {
+            const content = fs.readFileSync(file, 'utf-8');
+            if (/(?:^|\n)\s*(?:pub\s+)?(?:async\s+)?fn\s+main\s*\(/.test(content)) {
+                mainFiles.push(file);
+            }
+        } catch {
+            // skip unreadable files
+        }
+    }
+
+    if (mainFiles.length !== 1) {
+        return null; // Need exactly one entry point
+    }
+
+    return {
+        dirPath: dir,
+        entryFile: mainFiles[0],
+        allFiles: entries,
+    };
+}
+
+/**
+ * Quick test: is this file part of a loose modules directory?
+ */
+export function isLooseModuleFile(filePath: string): boolean {
+    return detectLooseModules(filePath) !== null;
 }

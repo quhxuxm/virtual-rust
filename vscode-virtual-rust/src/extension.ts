@@ -20,7 +20,7 @@
  */
 
 import * as vscode from 'vscode';
-import { isVirtualRustSource } from './detector';
+import { isVirtualRustSource, detectLooseModules } from './detector';
 import { ShadowProjectManager } from './shadow';
 import { Runner } from './runner';
 import { VirtualRustCodeLensProvider } from './codeLens';
@@ -168,7 +168,8 @@ export function activate(context: vscode.ExtensionContext): void {
         if (
             isAutoSync() &&
             editor.document.languageId === 'rust' &&
-            isVirtualRustSource(editor.document.getText())
+            (isVirtualRustSource(editor.document.getText()) ||
+             detectLooseModules(editor.document.uri.fsPath))
         ) {
             shadowManager.syncProject(editor.document);
         }
@@ -178,7 +179,8 @@ export function activate(context: vscode.ExtensionContext): void {
         if (
             doc.languageId === 'rust' &&
             isAutoSync() &&
-            isVirtualRustSource(doc.getText())
+            (isVirtualRustSource(doc.getText()) ||
+             detectLooseModules(doc.uri.fsPath))
         ) {
             shadowManager.syncProject(doc);
         }

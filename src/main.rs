@@ -178,6 +178,15 @@ fn run_file(file_path: &str, passthrough_args: &[String]) {
         return;
     }
 
+    // Check if argument is a directory of loose .rs files (no Cargo.toml)
+    if virtual_rust::cargo_runner::is_rust_source_dir(path) {
+        if let Err(e) = virtual_rust::cargo_runner::run_rust_dir(path, passthrough_args) {
+            eprintln!("\x1b[31merror\x1b[0m: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     match fs::read_to_string(file_path) {
         Ok(source) => {
             if virtual_rust::cargo_runner::has_dependencies(&source) {
