@@ -16,6 +16,7 @@
 //! ```
 
 pub mod ast;
+pub mod cargo_runner;
 pub mod interpreter;
 pub mod lexer;
 pub mod parser;
@@ -27,9 +28,7 @@ use parser::Parser;
 
 /// Compiles source code through the lexer → parser → AST pipeline.
 fn compile(source: &str) -> Result<Vec<ast::Expr>, String> {
-    let tokens = Lexer::new(source)
-        .tokenize()
-        .map_err(|e| format!("{e}"))?;
+    let tokens = Lexer::new(source).tokenize().map_err(|e| format!("{e}"))?;
 
     Parser::new(tokens)
         .parse_program()

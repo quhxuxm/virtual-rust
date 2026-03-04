@@ -36,6 +36,13 @@ fn print_help() {
     println!("    - Iterator methods: map, filter, fold, enumerate, zip, etc.");
     println!("    - String methods: len, contains, split, trim, replace, etc.");
     println!("    - Math operations: abs, sqrt, pow, sin, cos, etc.");
+    println!();
+    println!("DEPENDENCIES:");
+    println!("    Add //! comments at the top of your .rs file to declare dependencies:");
+    println!("        //! [dependencies]");
+    println!("        //! serde = \"1.0\"");
+    println!("        //! rand = \"0.8\"");
+    println!("    Files with dependencies are compiled with cargo automatically.");
 }
 
 fn run_repl() {
@@ -209,9 +216,21 @@ fn main() {
 
             match fs::read_to_string(file_path) {
                 Ok(source) => {
-                    if let Err(e) = run_source(&source) {
-                        eprintln!("\x1b[31merror\x1b[0m: {}", e);
-                        std::process::exit(1);
+                    if virtual_rust::cargo_runner::has_dependencies(&source) {
+                        // Dependencies detected — compile & run with cargo
+                        let path = std::path::Path::new(file_path);
+                        if let Err(e) =
+                            virtual_rust::cargo_runner::run_with_cargo(&source, Some(path))
+                        {
+                            eprintln!("\x1b[31merror\x1b[0m: {}", e);
+                            std::process::exit(1);
+                        }
+                    } else {
+                        // No dependencies — use the interpreter
+                        if let Err(e) = run_source(&source) {
+                            eprintln!("\x1b[31merror\x1b[0m: {}", e);
+                            std::process::exit(1);
+                        }
                     }
                 }
                 Err(e) => {
