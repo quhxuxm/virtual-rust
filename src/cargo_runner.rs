@@ -1,10 +1,11 @@
-//! Compiles and runs Rust source files that declare external dependencies.
+//! Compiles and runs Rust source files that declare external dependencies,
+//! or runs existing Cargo projects directly.
+//!
+//! # Single-file dependencies
 //!
 //! When a `.rs` file contains embedded Cargo manifest sections in `//!`
 //! doc comments (e.g. `[dependencies]`), this module creates a temporary
 //! Cargo project, writes a proper `Cargo.toml`, and delegates to `cargo run`.
-//!
-//! # Dependency syntax
 //!
 //! ```rust,ignore
 //! //! [dependencies]
@@ -18,6 +19,15 @@
 //!     let n: i32 = rand::thread_rng().gen_range(1..=100);
 //!     println!("Random number: {n}");
 //! }
+//! ```
+//!
+//! # Cargo projects
+//!
+//! When pointed at a directory containing a `Cargo.toml`, virtual-rust will
+//! compile and run the project with `cargo run` directly:
+//!
+//! ```bash
+//! virtual-rust ./my-project
 //! ```
 
 use std::fs;
@@ -205,6 +215,80 @@ pub fn run_with_cargo(source: &str, source_path: Option<&Path>) -> Result<(), St
     Ok(())
 }
 
+// ── Cargo project support ────────────────────────────────────────────
+
+/// Returns `true` if the given path is a Cargo project directory
+/// (i.e. it is a directory containing a `Cargo.toml`).
+pub fn is_cargo_project(path: &Path) -> bool {
+    path.is_dir() && path.join("Cargo.toml").exists()
+}
+
+/// Runs an existing Cargo project directory with `cargo run`.
+///
+/// If the project has no dependencies (empty `[dependencies]` or none at all),
+/// the interpreter *could* be used, but we always delegate to cargo for
+/// full compatibility with the project's build configuration, build scripts,
+/// proc macros, multiple source files, modules, etc.
+pub fn run_cargo_project(project_dir: &Path, extra_args: &[String]) -> Result<(), String> {
+    let cargo_toml = project_dir.join("Cargo.toml");
+    if !cargo_toml.exists() {
+        return Err(format!(
+            "No Cargo.toml found in '{}'",
+            project_dir.display()
+        ));
+    }
+
+    // Read project name from Cargo.toml for display
+    let display_name = read_project_name(&cargo_toml)
+        .unwrap_or_else(|| project_dir.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("project")
+            .to_string());
+
+    eprintln!(
+        "\x1b[1;32m   Compiling\x1b[0m {} (cargo project)",
+        display_name
+    );
+
+    let mut cmd = Command::new("cargo");
+    cmd.arg("run").arg("--quiet").current_dir(project_dir);
+
+    // Pass extra arguments after `--`
+    if !extra_args.is_empty() {
+        cmd.arg("--");
+        cmd.args(extra_args);
+    }
+
+    let status = cmd
+        .status()
+        .map_err(|e| format!("Failed to invoke cargo: {e}. Is cargo installed?"))?;
+
+    if !status.success() {
+        return Err(format!(
+            "cargo run failed (exit code: {})",
+            status.code().unwrap_or(-1)
+        ));
+    }
+
+    Ok(())
+}
+
+/// Reads the `name` field from a Cargo.toml (best-effort, no TOML parser).
+fn read_project_name(cargo_toml: &Path) -> Option<String> {
+    let content = fs::read_to_string(cargo_toml).ok()?;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("name") {
+            let rest = rest.trim();
+            if let Some(rest) = rest.strip_prefix('=') {
+                let rest = rest.trim().trim_matches('"');
+                return Some(rest.to_string());
+            }
+        }
+    }
+    None
+}
+
 // ── Tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -282,5 +366,26 @@ fn main() {}
         // Should NOT duplicate [package]
         assert_eq!(toml.matches("[package]").count(), 1);
         assert!(toml.contains("my-script"));
+    }
+
+    #[test]
+    fn is_cargo_project_detection() {
+        // The virtual-rust project itself is a cargo project
+        let project_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert!(is_cargo_project(project_root));
+
+        // A non-existent path is not
+        assert!(!is_cargo_project(Path::new("/nonexistent/fake/path")));
+
+        // A file is not a directory
+        let cargo_toml = project_root.join("Cargo.toml");
+        assert!(!is_cargo_project(&cargo_toml));
+    }
+
+    #[test]
+    fn read_project_name_works() {
+        let project_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let name = read_project_name(&project_root.join("Cargo.toml"));
+        assert_eq!(name, Some("virtual-rust".to_string()));
     }
 }

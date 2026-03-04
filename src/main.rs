@@ -10,9 +10,13 @@ fn print_help() {
     println!("Virtual Rust v{}", VERSION);
     println!("A virtual machine that interprets Rust source code directly.\n");
     println!("USAGE:");
-    println!("    virtual-rust [OPTIONS] [FILE]\n");
+    println!("    virtual-rust [OPTIONS] [FILE|DIR] [-- ARGS...]");
+    println!();
     println!("ARGS:");
-    println!("    <FILE>    Path to a Rust source file (.rs) to execute\n");
+    println!("    <FILE>    Path to a Rust source file (.rs) to execute");
+    println!("    <DIR>     Path to a Cargo project directory to compile & run");
+    println!("    [ARGS]    Arguments passed to the compiled program (after --)");
+    println!();
     println!("OPTIONS:");
     println!("    -e, --eval <CODE>    Evaluate a Rust expression");
     println!("    -h, --help           Print help information");
@@ -21,8 +25,8 @@ fn print_help() {
     println!("EXAMPLES:");
     println!("    virtual-rust hello.rs");
     println!("    virtual-rust -e 'println!(\"Hello, World!\")'");
-    println!("    virtual-rust --repl");
-    println!("\nSUPPORTED FEATURES:");
+    println!("    virtual-rust --repl");    println!("    virtual-rust ./my-project");
+    println!("    virtual-rust ./my-project -- --flag value");    println!("\nSUPPORTED FEATURES:");
     println!("    - Variables (let, let mut) with type inference");
     println!("    - Functions (fn) with parameters and return types");
     println!("    - Control flow: if/else, while, loop, for..in");
@@ -43,6 +47,11 @@ fn print_help() {
     println!("        //! serde = \"1.0\"");
     println!("        //! rand = \"0.8\"");
     println!("    Files with dependencies are compiled with cargo automatically.");
+    println!();
+    println!("CARGO PROJECTS:");
+    println!("    Point virtual-rust at a directory containing Cargo.toml:");
+    println!("        virtual-rust ./my-project");
+    println!("    The project will be compiled and run with cargo.");
 }
 
 fn run_repl() {
@@ -170,6 +179,15 @@ fn run_repl() {
     }
 }
 
+/// Collects arguments after `--` to pass through to the target program.
+fn collect_passthrough_args(args: &[String]) -> Vec<String> {
+    if let Some(pos) = args.iter().position(|a| a == "--") {
+        args[pos + 1..].to_vec()
+    } else {
+        Vec::new()
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -212,6 +230,20 @@ fn main() {
                 eprintln!("Unknown option: {}", file_path);
                 eprintln!("Run 'virtual-rust --help' for usage.");
                 std::process::exit(1);
+            }
+
+            let path = std::path::Path::new(file_path);
+
+            // Check if argument is a Cargo project directory
+            if virtual_rust::cargo_runner::is_cargo_project(path) {
+                let extra_args = collect_passthrough_args(&args);
+                if let Err(e) =
+                    virtual_rust::cargo_runner::run_cargo_project(path, &extra_args)
+                {
+                    eprintln!("\x1b[31merror\x1b[0m: {}", e);
+                    std::process::exit(1);
+                }
+                return;
             }
 
             match fs::read_to_string(file_path) {
