@@ -119,6 +119,35 @@ virtual-rust ./my-project -- --release
 
 The `examples/multi_bin` project demonstrates this — it defines three binaries (`server`, `client`, `health`) and requires `--bin <name>` to select which one to run.
 
+### Running Loose `.rs` Directories
+
+Virtual Rust can also run a directory of plain `.rs` files that have **no `Cargo.toml`**. It automatically:
+
+1. Finds the entry point (the file containing `fn main()`)
+2. Generates a temporary Cargo project
+3. Copies the entry file as `src/main.rs` and all other `.rs` files as modules
+4. Compiles and runs the project
+
+```bash
+# Given a folder with main.rs, math.rs, greeting.rs (no Cargo.toml)
+virtual-rust ./examples/loose_modules
+```
+
+The entry file can use `mod` to reference sibling files:
+
+```rust
+// main.rs
+mod math;
+mod greeting;
+
+fn main() {
+    println!("{}", greeting::hello("World"));
+    println!("Sum = {}", math::sum(&[1, 2, 3]));
+}
+```
+
+The `examples/loose_modules` directory demonstrates this pattern.
+
 ## Examples
 
 ```rust

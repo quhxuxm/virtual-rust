@@ -1,5 +1,6 @@
 //! Compiles and runs Rust source files that declare external dependencies,
-//! or runs existing Cargo projects directly.
+//! runs existing Cargo projects, or assembles loose `.rs` directories into
+//! temporary Cargo projects.
 //!
 //! # Single-file dependencies
 //!
@@ -28,6 +29,17 @@
 //!
 //! ```bash
 //! virtual-rust ./my-project
+//! ```
+//!
+//! # Loose `.rs` directories
+//!
+//! When pointed at a directory containing `.rs` files but **no** `Cargo.toml`,
+//! virtual-rust will automatically assemble them into a temporary Cargo project.
+//! The file containing `fn main()` becomes `src/main.rs`, and all other files
+//! are copied as sibling modules under `src/`.
+//!
+//! ```bash
+//! virtual-rust ./my-scripts/    # directory with main.rs, utils.rs, etc.
 //! ```
 
 use std::fs;
@@ -229,6 +241,198 @@ pub fn is_cargo_project(path: &Path) -> bool {
     path.is_dir() && path.join("Cargo.toml").exists()
 }
 
+/// Returns `true` if the given path is a directory containing `.rs` files
+/// but no `Cargo.toml` (i.e. a loose collection of Rust source files).
+pub fn is_rust_source_dir(path: &Path) -> bool {
+    if !path.is_dir() || path.join("Cargo.toml").exists() {
+        return false;
+    }
+    // Check for at least one .rs file in the directory
+    match fs::read_dir(path) {
+        Ok(entries) => entries
+            .filter_map(|e| e.ok())
+            .any(|e| {
+                e.path().extension().and_then(|ext| ext.to_str()) == Some("rs")
+            }),
+        Err(_) => false,
+    }
+}
+
+/// Scans a directory of `.rs` files, finds the entry point (file containing
+/// `fn main()`), and returns `(entry_file, all_rs_files)`.
+fn find_entry_file(dir: &Path) -> Result<(PathBuf, Vec<PathBuf>), String> {
+    let entries: Vec<PathBuf> = fs::read_dir(dir)
+        .map_err(|e| format!("Failed to read directory '{}': {e}", dir.display()))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|ext| ext.to_str()) == Some("rs"))
+        .collect();
+
+    if entries.is_empty() {
+        return Err(format!("No .rs files found in '{}'", dir.display()));
+    }
+
+    let mut main_files = Vec::new();
+    for path in &entries {
+        if let Ok(content) = fs::read_to_string(path) {
+            // Look for `fn main()` — a simple heuristic
+            if content.contains("fn main()") {
+                main_files.push(path.clone());
+            }
+        }
+    }
+
+    match main_files.len() {
+        0 => Err(format!(
+            "No entry point found: none of the .rs files in '{}' contain `fn main()`",
+            dir.display()
+        )),
+        1 => Ok((main_files.into_iter().next().unwrap(), entries)),
+        _ => {
+            let names: Vec<String> = main_files
+                .iter()
+                .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
+                .collect();
+            Err(format!(
+                "Multiple entry points found in '{}': {}. \
+                 Please pass the specific .rs file to run instead.",
+                dir.display(),
+                names.join(", ")
+            ))
+        }
+    }
+}
+
+/// Collects any embedded manifest (`//! [dependencies]`) from any `.rs` file
+/// in the directory. Merges all `[dependencies]` into a single manifest.
+fn collect_embedded_manifests(rs_files: &[PathBuf]) -> Option<EmbeddedManifest> {
+    let mut all_deps_lines = Vec::new();
+    let mut found_any = false;
+
+    for path in rs_files {
+        if let Ok(content) = fs::read_to_string(path) {
+            if let Some(manifest) = parse_embedded_manifest(&content) {
+                found_any = true;
+                // Collect lines that are within [dependencies] sections
+                let mut in_deps = false;
+                for line in manifest.toml_content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with('[') {
+                        in_deps = trimmed == "[dependencies]";
+                        if !in_deps {
+                            // Preserve other sections as-is
+                            all_deps_lines.push(line.to_string());
+                        }
+                        continue;
+                    }
+                    if in_deps && !trimmed.is_empty() {
+                        // Avoid duplicate dependency lines
+                        if !all_deps_lines.contains(&line.to_string()) {
+                            all_deps_lines.push(line.to_string());
+                        }
+                    } else if !in_deps {
+                        all_deps_lines.push(line.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    if !found_any {
+        return None;
+    }
+
+    let mut toml_content = String::from("[dependencies]\n");
+    toml_content.push_str(&all_deps_lines.join("\n"));
+
+    Some(EmbeddedManifest { toml_content })
+}
+
+/// Runs a directory of loose `.rs` files by generating a temporary Cargo project.
+///
+/// 1. Finds the entry file (containing `fn main()`)
+/// 2. Creates a cached Cargo project directory
+/// 3. Copies the entry file as `src/main.rs` and all other files as `src/<name>.rs`
+/// 4. Collects any embedded dependency manifests from all files
+/// 5. Invokes `cargo run --quiet`
+pub fn run_rust_dir(dir: &Path, extra_args: &[String]) -> Result<(), String> {
+    let (entry_file, all_files) = find_entry_file(dir)?;
+
+    let dir_name = dir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("rust-project");
+
+    // Use the directory path for deterministic caching
+    let project_dir = project_cache_dir(Some(dir))?;
+    let src_dir = project_dir.join("src");
+    fs::create_dir_all(&src_dir).map_err(|e| format!("Failed to create src directory: {e}"))?;
+
+    // Collect any embedded manifests for Cargo.toml generation
+    let manifest = collect_embedded_manifests(&all_files);
+    let cargo_toml = if let Some(ref m) = manifest {
+        generate_cargo_toml(m, Some(dir))
+    } else {
+        format!(
+            "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            dir_name
+                .to_lowercase()
+                .replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "-")
+        )
+    };
+    fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
+        .map_err(|e| format!("Failed to write Cargo.toml: {e}"))?;
+
+    // Copy entry file as src/main.rs (strip manifest comments if any)
+    let entry_source = fs::read_to_string(&entry_file)
+        .map_err(|e| format!("Failed to read '{}': {e}", entry_file.display()))?;
+    let clean_entry = strip_manifest_comments(&entry_source);
+    fs::write(src_dir.join("main.rs"), &clean_entry)
+        .map_err(|e| format!("Failed to write main.rs: {e}"))?;
+
+    // Copy all other .rs files as modules in src/
+    for file in &all_files {
+        if file == &entry_file {
+            continue;
+        }
+        let file_name = file
+            .file_name()
+            .ok_or_else(|| format!("Invalid file path: {}", file.display()))?;
+        let source = fs::read_to_string(file)
+            .map_err(|e| format!("Failed to read '{}': {e}", file.display()))?;
+        let clean = strip_manifest_comments(&source);
+        fs::write(src_dir.join(file_name), &clean)
+            .map_err(|e| format!("Failed to write '{}': {e}", file_name.to_string_lossy()))?;
+    }
+
+    eprintln!(
+        "\x1b[1;32m   Compiling\x1b[0m {} (rust source directory, {} files)",
+        dir_name,
+        all_files.len()
+    );
+
+    let mut cmd = Command::new("cargo");
+    cmd.args(["run", "--quiet"]).current_dir(&project_dir);
+
+    // Pass extra arguments directly to cargo
+    if !extra_args.is_empty() {
+        cmd.args(extra_args);
+    }
+
+    let status = cmd
+        .status()
+        .map_err(|e| format!("Failed to invoke cargo: {e}. Is cargo installed?"))?;
+
+    if !status.success() {
+        return Err(format!(
+            "Compilation failed (exit code: {})",
+            status.code().unwrap_or(-1)
+        ));
+    }
+
+    Ok(())
+}
+
 /// Runs an existing Cargo project directory with `cargo run`.
 ///
 /// If the project has no dependencies (empty `[dependencies]` or none at all),
@@ -392,5 +596,45 @@ fn main() {}
         let project_root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let name = read_project_name(&project_root.join("Cargo.toml"));
         assert_eq!(name, Some("virtual-rust".to_string()));
+    }
+
+    #[test]
+    fn is_rust_source_dir_detection() {
+        let project_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+        // A directory with .rs files and no Cargo.toml
+        let loose_dir = project_root.join("examples").join("loose_modules");
+        assert!(is_rust_source_dir(&loose_dir));
+
+        // A Cargo project directory is NOT a rust source dir
+        assert!(!is_rust_source_dir(project_root));
+
+        // A non-existent path is not
+        assert!(!is_rust_source_dir(Path::new("/nonexistent/fake/path")));
+
+        // A file is not a directory
+        assert!(!is_rust_source_dir(&project_root.join("Cargo.toml")));
+    }
+
+    #[test]
+    fn find_entry_file_works() {
+        let project_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let loose_dir = project_root.join("examples").join("loose_modules");
+
+        let (entry, all_files) = find_entry_file(&loose_dir).unwrap();
+        assert_eq!(entry.file_name().unwrap(), "main.rs");
+        assert_eq!(all_files.len(), 3); // main.rs, math.rs, greeting.rs
+    }
+
+    #[test]
+    fn find_entry_file_no_main() {
+        // Create a temp dir with a .rs file that has no main
+        let tmp = std::env::temp_dir().join("virtual-rust-test-no-main");
+        let _ = fs::create_dir_all(&tmp);
+        fs::write(tmp.join("lib.rs"), "pub fn foo() {}").unwrap();
+        let result = find_entry_file(&tmp);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No entry point found"));
+        let _ = fs::remove_dir_all(&tmp);
     }
 }
