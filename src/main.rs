@@ -1,63 +1,45 @@
-use std::env;
 use std::fs;
 use std::io::{self, BufRead, Write};
 
+use clap::{Parser, Subcommand};
 use virtual_rust::{eval_source, run_source};
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+// ── CLI definition ───────────────────────────────────────────────
 
-fn print_help() {
-    println!("Virtual Rust v{}", VERSION);
-    println!("A virtual machine that interprets Rust source code directly.\n");
-    println!("USAGE:");
-    println!("    virtual-rust [OPTIONS] [FILE|DIR] [-- ARGS...]");
-    println!();
-    println!("ARGS:");
-    println!("    <FILE>    Path to a Rust source file (.rs) to execute");
-    println!("    <DIR>     Path to a Cargo project directory to compile & run");
-    println!("    [ARGS]    Arguments passed to the compiled program (after --)");
-    println!();
-    println!("OPTIONS:");
-    println!("    -e, --eval <CODE>    Evaluate a Rust expression");
-    println!("    -h, --help           Print help information");
-    println!("    -V, --version        Print version information");
-    println!("    --repl               Start interactive REPL mode\n");
-    println!("EXAMPLES:");
-    println!("    virtual-rust hello.rs");
-    println!("    virtual-rust -e 'println!(\"Hello, World!\")'");
-    println!("    virtual-rust --repl");
-    println!("    virtual-rust ./my-project");
-    println!("    virtual-rust ./my-project -- --flag value");
-    println!("\nSUPPORTED FEATURES:");
-    println!("    - Variables (let, let mut) with type inference");
-    println!("    - Functions (fn) with parameters and return types");
-    println!("    - Control flow: if/else, while, loop, for..in");
-    println!("    - Arithmetic, comparison, logical, bitwise operators");
-    println!("    - String, array/Vec, tuple operations");
-    println!("    - Structs with field access");
-    println!("    - Match expressions with patterns");
-    println!("    - Closures and higher-order functions (map, filter, fold)");
-    println!("    - Type casting (as)");
-    println!("    - Macros: println!, print!, format!, assert!, assert_eq!, vec!, dbg!");
-    println!("    - Iterator methods: map, filter, fold, enumerate, zip, etc.");
-    println!("    - String methods: len, contains, split, trim, replace, etc.");
-    println!("    - Math operations: abs, sqrt, pow, sin, cos, etc.");
-    println!();
-    println!("DEPENDENCIES:");
-    println!("    Add //! comments at the top of your .rs file to declare dependencies:");
-    println!("        //! [dependencies]");
-    println!("        //! serde = \"1.0\"");
-    println!("        //! rand = \"0.8\"");
-    println!("    Files with dependencies are compiled with cargo automatically.");
-    println!();
-    println!("CARGO PROJECTS:");
-    println!("    Point virtual-rust at a directory containing Cargo.toml:");
-    println!("        virtual-rust ./my-project");
-    println!("    The project will be compiled and run with cargo.");
+/// A virtual machine that interprets and runs Rust source code directly.
+#[derive(Parser)]
+#[command(name = "virtual-rust", version, about, long_about = LONG_ABOUT)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+
+    /// Path to a Rust source file (.rs) or Cargo project directory to execute
+    #[arg(value_name = "FILE|DIR")]
+    input: Option<String>,
+
+    /// Arguments passed through to the compiled program
+    #[arg(last = true, value_name = "ARGS")]
+    passthrough_args: Vec<String>,
 }
 
+#[derive(Subcommand)]
+enum Command {
+    /// Start an interactive REPL session
+    Repl,
+    /// Evaluate a Rust expression or statement
+    Eval {
+        /// The Rust code to evaluate
+        code: String,
+    },
+}
+
+const LONG_ABOUT: &str = include_str!("long_about.txt");
+
+// ── REPL ─────────────────────────────────────────────────────────
+
 fn run_repl() {
-    println!("Virtual Rust v{} — Interactive REPL", VERSION);
+    let version = env!("CARGO_PKG_VERSION");
+    println!("Virtual Rust v{version} — Interactive REPL");
     println!("Type Rust expressions or statements. Type :quit to exit.\n");
 
     let stdin = io::stdin();
@@ -107,7 +89,8 @@ fn run_repl() {
                     continue;
                 }
                 ":version" | ":v" => {
-                    println!("Virtual Rust v{}", VERSION);
+                    let v = env!("CARGO_PKG_VERSION");
+                    println!("Virtual Rust v{v}");
                     continue;
                 }
                 "" => continue,
@@ -181,95 +164,62 @@ fn run_repl() {
     }
 }
 
-/// Collects arguments after `--` to pass through to the target program.
-fn collect_passthrough_args(args: &[String]) -> Vec<String> {
-    if let Some(pos) = args.iter().position(|a| a == "--") {
-        args[pos + 1..].to_vec()
-    } else {
-        Vec::new()
+// ── Entry point ──────────────────────────────────────────────────
+
+fn run_file(file_path: &str, passthrough_args: &[String]) {
+    let path = std::path::Path::new(file_path);
+
+    // Check if argument is a Cargo project directory
+    if virtual_rust::cargo_runner::is_cargo_project(path) {
+        if let Err(e) = virtual_rust::cargo_runner::run_cargo_project(path, passthrough_args) {
+            eprintln!("\x1b[31merror\x1b[0m: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    match fs::read_to_string(file_path) {
+        Ok(source) => {
+            if virtual_rust::cargo_runner::has_dependencies(&source) {
+                // Dependencies detected — compile & run with cargo
+                if let Err(e) = virtual_rust::cargo_runner::run_with_cargo(&source, Some(path)) {
+                    eprintln!("\x1b[31merror\x1b[0m: {e}");
+                    std::process::exit(1);
+                }
+            } else {
+                // No dependencies — use the interpreter
+                if let Err(e) = run_source(&source) {
+                    eprintln!("\x1b[31merror\x1b[0m: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Error reading file '{file_path}': {e}");
+            std::process::exit(1);
+        }
     }
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let cli = Cli::parse();
 
-    if args.len() < 2 {
-        // No arguments - start REPL
-        run_repl();
-        return;
-    }
-
-    match args[1].as_str() {
-        "-h" | "--help" => {
-            print_help();
-        }
-        "-V" | "--version" => {
-            println!("virtual-rust {}", VERSION);
-        }
-        "--repl" => {
-            run_repl();
-        }
-        "-e" | "--eval" => {
-            if args.len() < 3 {
-                eprintln!("Error: --eval requires a code argument");
+    match cli.command {
+        Some(Command::Repl) => run_repl(),
+        Some(Command::Eval { code }) => match eval_source(&code) {
+            Ok(result) => {
+                if result != "()" {
+                    println!("{result}");
+                }
+            }
+            Err(e) => {
+                eprintln!("\x1b[31merror\x1b[0m: {e}");
                 std::process::exit(1);
             }
-            let code = &args[2];
-            match eval_source(code) {
-                Ok(result) => {
-                    if result != "()" {
-                        println!("{}", result);
-                    }
-                }
-                Err(e) => {
-                    eprintln!("\x1b[31merror\x1b[0m: {}", e);
-                    std::process::exit(1);
-                }
-            }
-        }
-        file_path => {
-            if file_path.starts_with('-') {
-                eprintln!("Unknown option: {}", file_path);
-                eprintln!("Run 'virtual-rust --help' for usage.");
-                std::process::exit(1);
-            }
-
-            let path = std::path::Path::new(file_path);
-
-            // Check if argument is a Cargo project directory
-            if virtual_rust::cargo_runner::is_cargo_project(path) {
-                let extra_args = collect_passthrough_args(&args);
-                if let Err(e) = virtual_rust::cargo_runner::run_cargo_project(path, &extra_args) {
-                    eprintln!("\x1b[31merror\x1b[0m: {}", e);
-                    std::process::exit(1);
-                }
-                return;
-            }
-
-            match fs::read_to_string(file_path) {
-                Ok(source) => {
-                    if virtual_rust::cargo_runner::has_dependencies(&source) {
-                        // Dependencies detected — compile & run with cargo
-                        let path = std::path::Path::new(file_path);
-                        if let Err(e) =
-                            virtual_rust::cargo_runner::run_with_cargo(&source, Some(path))
-                        {
-                            eprintln!("\x1b[31merror\x1b[0m: {}", e);
-                            std::process::exit(1);
-                        }
-                    } else {
-                        // No dependencies — use the interpreter
-                        if let Err(e) = run_source(&source) {
-                            eprintln!("\x1b[31merror\x1b[0m: {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Error reading file '{}': {}", file_path, e);
-                    std::process::exit(1);
-                }
-            }
-        }
+        },
+        None => match cli.input {
+            Some(input) => run_file(&input, &cli.passthrough_args),
+            None => run_repl(),
+        },
     }
 }

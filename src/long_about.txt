@@ -1,0 +1,28 @@
+A virtual machine that interprets and runs Rust source code directly.
+
+SUPPORTED FEATURES:
+  - Variables (let, let mut) with type inference
+  - Functions (fn) with parameters and return types
+  - Control flow: if/else, while, loop, for..in
+  - Arithmetic, comparison, logical, bitwise operators
+  - String, array/Vec, tuple operations
+  - Structs with field access
+  - Match expressions with patterns
+  - Closures and higher-order functions (map, filter, fold)
+  - Type casting (as)
+  - Macros: println!, print!, format!, assert!, assert_eq!, vec!, dbg!
+  - Iterator methods: map, filter, fold, enumerate, zip, etc.
+  - String methods: len, contains, split, trim, replace, etc.
+  - Math operations: abs, sqrt, pow, sin, cos, etc.
+
+DEPENDENCIES:
+  Add //! comments at the top of your .rs file to declare dependencies:
+      //! [dependencies]
+      //! serde = "1.0"
+      //! rand = "0.8"
+  Files with dependencies are compiled with cargo automatically.
+
+CARGO PROJECTS:
+  Point virtual-rust at a directory containing Cargo.toml:
+      virtual-rust ./my-project
+  The project will be compiled and run with cargo.
