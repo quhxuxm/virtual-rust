@@ -13,6 +13,9 @@ cargo build --release
 # Run a Rust source file directly
 cargo run -- examples/hello.rs
 
+# Run a cargo project with multiple binaries
+cargo run -- examples/multi_bin -- --bin server
+
 # Evaluate an expression
 cargo run -- -e 'println!("Hello from Virtual Rust!");'
 
@@ -95,6 +98,26 @@ virtual-rust --help
 | `:help`, `:h` | Show help |
 | `:clear`, `:c` | Clear environment |
 | `:version`, `:v` | Show version |
+
+### Running Cargo Projects
+
+Virtual Rust can run entire Cargo project directories. Extra arguments after `--` are passed directly to `cargo run`, so you can use any cargo flags like `--bin`, `--release`, etc.
+
+```bash
+# Run a Cargo project directory
+virtual-rust ./my-project
+
+# Run a specific binary in a multi-bin project
+virtual-rust ./examples/multi_bin -- --bin server
+
+# Pass both cargo flags and program arguments
+virtual-rust ./examples/multi_bin -- --bin server -- 9090
+
+# Build in release mode
+virtual-rust ./my-project -- --release
+```
+
+The `examples/multi_bin` project demonstrates this — it defines three binaries (`server`, `client`, `health`) and requires `--bin <name>` to select which one to run.
 
 ## Examples
 
