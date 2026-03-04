@@ -41,5 +41,8 @@ pub fn json_demo() {
     println!("  Serialized:\n  {}", json.replace('\n', "\n  "));
 
     let back: User = serde_json::from_str(&json).unwrap();
-    println!("  Deserialized: {} (age {}), roles: {:?}", back.name, back.age, back.roles);
+    println!(
+        "  Deserialized: {} (age {}), roles: {:?}",
+        back.name, back.age, back.roles
+    );
 }

@@ -1,8 +1,8 @@
 use std::env;
 use std::fs;
-use std::io::{self, Write, BufRead};
+use std::io::{self, BufRead, Write};
 
-use virtual_rust::{run_source, eval_source};
+use virtual_rust::{eval_source, run_source};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -25,8 +25,10 @@ fn print_help() {
     println!("EXAMPLES:");
     println!("    virtual-rust hello.rs");
     println!("    virtual-rust -e 'println!(\"Hello, World!\")'");
-    println!("    virtual-rust --repl");    println!("    virtual-rust ./my-project");
-    println!("    virtual-rust ./my-project -- --flag value");    println!("\nSUPPORTED FEATURES:");
+    println!("    virtual-rust --repl");
+    println!("    virtual-rust ./my-project");
+    println!("    virtual-rust ./my-project -- --flag value");
+    println!("\nSUPPORTED FEATURES:");
     println!("    - Variables (let, let mut) with type inference");
     println!("    - Functions (fn) with parameters and return types");
     println!("    - Control flow: if/else, while, loop, for..in");
@@ -237,9 +239,7 @@ fn main() {
             // Check if argument is a Cargo project directory
             if virtual_rust::cargo_runner::is_cargo_project(path) {
                 let extra_args = collect_passthrough_args(&args);
-                if let Err(e) =
-                    virtual_rust::cargo_runner::run_cargo_project(path, &extra_args)
-                {
+                if let Err(e) = virtual_rust::cargo_runner::run_cargo_project(path, &extra_args) {
                     eprintln!("\x1b[31merror\x1b[0m: {}", e);
                     std::process::exit(1);
                 }
